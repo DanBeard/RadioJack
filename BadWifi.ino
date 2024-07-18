@@ -51,14 +51,14 @@ uint8_t btn_press = 0;
 lv_obj_t *label;
 
 // state machine globals
-enum BUNNY_STATE {
+enum RJ_STATE {
   MENU_STATE = 0,
   PAYLOAD_STATE,
   KEYBOARD_STATE,
   SERIAL_STATE
 };
 
-BUNNY_STATE state = MENU_STATE;
+RJ_STATE state = MENU_STATE;
 
 void led_task(void *param) {
   while (1) {
@@ -155,9 +155,9 @@ void setup_ps() {
 
   keyboard.press(KEY_LEFT_GUI);
   keyboard.press('r');
-  delay(1);
+  delay(10);
   keyboard.releaseAll();
-  delay(1);
+  delay(500);
 
   keyboard.print("powershell");
   delay(100);
@@ -182,7 +182,6 @@ void setup_ps() {
 
 
 void write_to_screen(char *label1_text) {
-  // TODO 2 label system like LoraBunny?
   lv_label_set_text(label, label1_text);
 }
 
@@ -209,6 +208,7 @@ void handle_user_input(const char *input, WiFiClient *client) {
       } else if(strcmp(input, "serial\r\n") == 0 || strcmp(input, "serial\n") == 0) {
         client->write("Entering serial mode\n");
         write_to_screen("SERIAL");
+        USBSerial2.write(" \r\n");
         state = SERIAL_STATE;
       } else {
         client->write("MENU: type 'payload' 'keyboard' or 'serial'. to exit a mode type 'hop away'\n->");
@@ -223,7 +223,7 @@ void handle_user_input(const char *input, WiFiClient *client) {
     break;
 
     case KEYBOARD_STATE: {
-#ifndef BUNNY_DEBUG
+#ifndef RJ_DEBUG
         size_t len = strlen(input); 
         keyboard.write((uint8_t*)input, len);
         write_to_screen("Keystrokes-->");
@@ -235,7 +235,7 @@ void handle_user_input(const char *input, WiFiClient *client) {
     break;
 
     case SERIAL_STATE:
-#ifndef BUNNY_DEBUG
+#ifndef RJ_DEBUG
         USBSerial2.write(input);
         write_to_screen("SERIAL");
 #else
@@ -262,6 +262,8 @@ void loop_wifi() {
     // keyboard.println("New Client.");           // print a message out the serial port
     if(client.connected()){
         client.write("Welcome!\n"); 
+        state = MENU_STATE;
+        handle_user_input(" ", &client); // print menu
         write_to_screen("Client connected");
       }
 
@@ -273,13 +275,12 @@ void loop_wifi() {
         // needs_flush = true;
         handle_user_input(s.c_str(), &client);
       }
-      while (USBSerial2.available()) {
+      while (state == SERIAL_STATE && USBSerial2.available()) {
         char c = USBSerial2.read();
         client.write(c);
       }
       // service other tasks/loops
       service_loop();
-      delay(1);
     }
     // close the connection:
     client.stop();
