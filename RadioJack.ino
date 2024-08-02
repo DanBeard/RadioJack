@@ -108,7 +108,7 @@ void setup() {
 
   // just want to have some ID to hopefully avoid SSID colision. 
   // hopefully this is good enough *shrug*
-  uint16_t small_id = low & 0xFFFF;
+  uint16_t small_id = high & 0xFFFF;
 
   snprintf(ssid, 23, "hax-%X", small_id);
   if (!WiFi.softAP(ssid, password)) {
