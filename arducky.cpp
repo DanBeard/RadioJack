@@ -1,6 +1,5 @@
 // modified from arducky -- https://github.com/Creased/arducky/blob/master/arducky.ino
 
-
 // SD card read/write
 #include "Arduino.h"
 #include "lv_driver.h"
@@ -223,9 +222,6 @@ void processLine(String line, USBHIDKeyboard keyboard) {
     keyboard.releaseAll();
 }
 
-/**
- * Functions
- **/
 short executeDucky(fs::FS &fs, USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg) {
       
       File file = fs.open(duckyfile_path);

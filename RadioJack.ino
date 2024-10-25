@@ -132,7 +132,6 @@ void sd_init(void) {
 
 void setup() {
   HWSerial.begin(115200);
-  HWSerial.println("Hello T-Dongle-S3");
   pinMode(TFT_LEDA_PIN, OUTPUT);
 
   // init USB HID
@@ -142,9 +141,6 @@ void setup() {
   USBSerial2.begin();
   USB.begin();
 
-  // keyboard.print("Starting...");
-
-
   // Initialise TFT
   tft.init();
   tft.setRotation(1);
@@ -152,7 +148,6 @@ void setup() {
   digitalWrite(TFT_LEDA_PIN, 0);
   tft.setTextFont(1);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  // tft.pushImage(0, 0, 160, 80, (uint16_t *)gImage_logo);
  
 
   // wifi AP setup
@@ -160,7 +155,7 @@ void setup() {
   uint32_t high    = ( ESP.getEfuseMac() >> 32 ) % 0xFFFFFFFF;
   uint64_t fullMAC = word(low,high);
 
-  // just want to have some ID to hopefully avoid SSID colision. 
+  // just want to have some ID to hopefully avoid SSID colision at conferences. 
   // hopefully this is good enough *shrug*
   uint16_t small_id = high & 0xFFFF;
 
@@ -168,19 +163,15 @@ void setup() {
   if (!WiFi.softAP(ssid, password)) {
     log_e("Soft AP creation failed.");
     keyboard.print("SoftAP creation failed :( ");
-    while (1)
-      ;
+    while (1);
   }
   IPAddress myIP = WiFi.softAPIP();
-  // keyboard.print("AP IP address: ");
-  // keyboard.println(myIP);
-  keyboard.releaseAll();
   server.begin();
 
   // BGR ordering is typical
   // --- Uncomment for shiny LEDs ---
-  // FastLED.addLeds<APA102, LED_DI_PIN, LED_CI_PIN, BGR>(&leds, 1);
-  // xTaskCreatePinnedToCore(led_task, "led_task", 1024, NULL, 1, NULL, 0);
+  FastLED.addLeds<APA102, LED_DI_PIN, LED_CI_PIN, BGR>(&leds, 1);
+  xTaskCreatePinnedToCore(led_task, "led_task", 1024, NULL, 1, NULL, 0);
 
   lvgl_init();
 
@@ -202,7 +193,7 @@ void setup() {
 
   button.attachClick([] { setup_ps(); });
 
-   // Init SD card
+  // Init SD card
   sd_init();
   delay(3000); // delay for 3 seconds so we can read SD mount info. Comment out if you don't care
 }
@@ -246,7 +237,7 @@ void write_to_screen(char *label1_text) {
 
 void handle_user_input(const char *input, WiFiClient *client) {
   // escape logic
-  if(state != MENU_STATE && (strcmp(input, "hop away\r\n") == 0 ||  strcmp(input, "hop away\n") == 0)) {
+  if(state != MENU_STATE && (strcmp(input, "radio jack off\r\n") == 0 ||  strcmp(input, "radio jack off\n") == 0)) {
        client->write("entering menu state\n");
        state = MENU_STATE;
        write_to_screen("MENU");
@@ -283,7 +274,7 @@ void handle_user_input(const char *input, WiFiClient *client) {
         USBSerial2.write(" \r\n");
         state = SERIAL_STATE;
       } else {
-        client->write("MENU: type 'payload', 'ducky', 'keyboard' or 'serial'. to exit a mode type 'hop away'\n->");
+        client->write("MENU: type 'payload', 'ducky', 'keyboard' or 'serial'. to exit a mode type 'radio jack off'\n->");
         write_to_screen("MENU-->");
         state = MENU_STATE;
       }
@@ -345,9 +336,6 @@ void loop_wifi() {
     while (client.connected()) {   // loop while the client's connected
       while (client.available()) { // if there's bytes to read from the client,
         String s = client.readString();   
-        // keyboard.write(c);
-        //USBSerial2.write(c);
-        // needs_flush = true;
         handle_user_input(s.c_str(), &client);
       }
       while (state == SERIAL_STATE && USBSerial2.available()) {
