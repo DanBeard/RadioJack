@@ -1,0 +1,1 @@
+short executeDucky(fs::FS &fs, USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg);
