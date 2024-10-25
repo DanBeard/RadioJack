@@ -20,7 +20,6 @@
 #define KEY_SPACE         0xB4
 #define KEY_BACKSPACE     0xB2
 
-char *duckyfile_path = (char*)"/ducky.txt";      // File containing payload placed on SD Card
 
 void processCommand(USBHIDKeyboard keyboard, String command) {
     /*
@@ -222,9 +221,9 @@ void processLine(String line, USBHIDKeyboard keyboard) {
     keyboard.releaseAll();
 }
 
-short executeDucky(fs::FS &fs, USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg) {
+short executeDucky(fs::FS &fs, const char* ducky_file_path,  USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg) {
       
-      File file = fs.open(duckyfile_path);
+      File file = fs.open(ducky_file_path);
       if (!file) {
         strncpy(errmsg, "Failed to open file for reading", maxErrMsg);
         return 3;

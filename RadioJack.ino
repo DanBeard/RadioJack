@@ -58,7 +58,8 @@ enum RJ_STATE {
   PAYLOAD_STATE,
   KEYBOARD_STATE,
   SERIAL_STATE,
-  DUCKY_STATE
+  DUCKY_STATE, // input for ducky
+  DUCKY_EXE_STATE // running ducky script
 };
 
 RJ_STATE state = MENU_STATE;
@@ -228,9 +229,41 @@ void setup_ps() {
     keyboard.write('n');
   }
 }
+#define MAX_FILE_LEVELS 5
+void listDir(WiFiClient *client, fs::FS &fs, const char *dirname, uint8_t cur_level) {
+  Serial.printf("Listing directory: %s\n", dirname);
 
+  File root = fs.open(dirname);
+  if (!root) {
+    client->write("Failed to open directory");
+    return;
+  }
+  if (!root.isDirectory()) {
+    client->write("Not a directory");
+    return;
+  }
 
-void write_to_screen(char *label1_text) {
+  File file = root.openNextFile();
+  while (file) {
+    const char *filename = file.name();
+    // skip hidden files
+    if(filename[0] != '.') { 
+      for(short i=0; i < cur_level; i++){
+          client->write("-");
+        }
+        client->write(" ");
+        client->write(filename);
+        client->write("\n");
+        if (file.isDirectory() && cur_level <= MAX_FILE_LEVELS) {
+              listDir(client, fs, file.path(), cur_level + 1);
+        }
+    }
+    file = root.openNextFile();
+  }
+  client->write("\n");
+}
+
+void write_to_screen(const char *label1_text) {
   lv_label_set_text(label, label1_text);
 }
 
@@ -251,19 +284,10 @@ void handle_user_input(const char *input, WiFiClient *client) {
         client->write("payload delivered\n");
         state = MENU_STATE;
       } else if(strcmp(input, "ducky\r\n") == 0 || strcmp(input, "ducky\n") == 0) {
-        client->write("Executing script at /ducky.txt \n");
-        write_to_screen("/ducky.txt");
+        client->write("Entering ducky mode \n");
+        listDir(client, SD_MMC, (const char*) "/", 0);
+        client->write("Which ducky file to run? (don't forget the leading /)");
         state = DUCKY_STATE;
-        char ducky_errmsg[40];
-        short ducky_err = executeDucky(SD_MMC, keyboard, ducky_errmsg, 40);
-        if(ducky_err != 0) {
-          client->write(ducky_errmsg);
-          client->write("\nducky failed. back to menu\n");
-        } else {
-            client->write("ducky ran \n");
-        }
-        
-        state = MENU_STATE;
       } else if(strcmp(input, "keyboard\r\n") == 0 || strcmp(input, "keyboard\n") == 0) {
         client->write("Entering keyboard mode\n");
         write_to_screen("KEYBOARD");
@@ -284,7 +308,25 @@ void handle_user_input(const char *input, WiFiClient *client) {
     case PAYLOAD_STATE:
          client->write("SHHHHH. still dropping payload");
     break;
-    case DUCKY_STATE:
+    case DUCKY_STATE: { 
+        client->write("running ->");
+        client->write(input);
+        client->write("\n");
+        write_to_screen(input);
+        state = DUCKY_EXE_STATE;
+        char ducky_errmsg[40];
+        short ducky_err = executeDucky(SD_MMC, input, keyboard, ducky_errmsg, 40);
+        if(ducky_err != 0) {
+          client->write(ducky_errmsg);
+          client->write("\nducky failed. back to menu\n");
+        } else {
+            client->write("ducky ran \n");
+        }
+        
+        state = MENU_STATE;
+    }
+    break;
+    case DUCKY_EXE_STATE:
         client->write("QUACK. still dropping ducky payload");
     break;
 
