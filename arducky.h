@@ -1,0 +1,1 @@
+short executeDucky(fs::FS &fs, const char* ducky_file_path, USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg);

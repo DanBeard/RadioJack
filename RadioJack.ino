@@ -1,9 +1,9 @@
-
 #include "Arduino.h"
 #include "SD_MMC.h"
 #include "logo.h"
 #include "lv_driver.h"
 #include "pin_config.h"
+
 
 /* external library */
 /* To use Arduino, you need to place lv_conf.h in the \Arduino\libraries directory */
@@ -22,6 +22,8 @@
 #include <WiFiAP.h>
 #include <WiFiClient.h>
 
+#include "arducky.h"
+
 // Serial globals
 
 // #if ARDUINO_USB_CDC_ON_BOOT
@@ -38,7 +40,7 @@ USBHIDMouse mouse;
 
 // Wifi Globals
 char ssid[25]; // sside generated in sprintf in setup()
-const char *password = "thepassword";
+const char *password = "thisisthepassword"; // after updating to esp32 2.0.14 this password needs to be longer than "thepassword". Dunno why.
 
 WiFiServer server(23);
 
@@ -55,7 +57,9 @@ enum RJ_STATE {
   MENU_STATE = 0,
   PAYLOAD_STATE,
   KEYBOARD_STATE,
-  SERIAL_STATE
+  SERIAL_STATE,
+  DUCKY_STATE, // input for ducky
+  DUCKY_EXE_STATE // running ducky script
 };
 
 RJ_STATE state = MENU_STATE;
@@ -69,6 +73,13 @@ void led_task(void *param) {
   }
 }
 
+#define PRINT_STR(str, x, y)                                                                                                                         \
+  do {                                                                                                                                               \
+    Serial.println(str);                                                                                                                             \
+    tft.drawString(str, x, y);                                                                                                                       \
+    y += 8;                                                                                                                                          \
+  } while (0);
+
 char label_text[255];
 void refresh_label_text() {
   label_text[0]='\0';
@@ -77,10 +88,51 @@ void refresh_label_text() {
   IPAddress myIP = WiFi.softAPIP();
   strcat(label_text, myIP.toString().c_str());
 }
+void sd_init(void) {
+  int32_t x, y;
+  SD_MMC.setPins(SD_MMC_CLK_PIN, SD_MMC_CMD_PIN, SD_MMC_D0_PIN, SD_MMC_D1_PIN, SD_MMC_D2_PIN, SD_MMC_D3_PIN);
+  if (!SD_MMC.begin()) {
+    PRINT_STR("Card Mount Failed", x, y)
+    return;
+  }
+  uint8_t cardType = SD_MMC.cardType();
+
+  if (cardType == CARD_NONE) {
+    PRINT_STR("No SD_MMC card attached", x, y)
+    return;
+  }
+  String str;
+  str = "SD_MMC Card Type: ";
+  if (cardType == CARD_MMC) {
+    str += "MMC";
+  } else if (cardType == CARD_SD) {
+    str += "SD_MMCSC";
+  } else if (cardType == CARD_SDHC) {
+    str += "SD_MMCHC";
+  } else {
+    str += "UNKNOWN";
+  }
+
+  PRINT_STR(str, x, y)
+  uint32_t cardSize = SD_MMC.cardSize() / (1024 * 1024);
+
+  str = "SD_MMC Card Size: ";
+  str += cardSize;
+  PRINT_STR(str, x, y)
+
+  str = "Total space: ";
+  str += uint32_t(SD_MMC.totalBytes() / (1024 * 1024));
+  str += "MB";
+  PRINT_STR(str, x, y)
+
+  str = "Used space: ";
+  str += uint32_t(SD_MMC.usedBytes() / (1024 * 1024));
+  str += "MB";
+  PRINT_STR(str, x, y)
+}
 
 void setup() {
   HWSerial.begin(115200);
-  HWSerial.println("Hello T-Dongle-S3");
   pinMode(TFT_LEDA_PIN, OUTPUT);
 
   // init USB HID
@@ -90,8 +142,6 @@ void setup() {
   USBSerial2.begin();
   USB.begin();
 
-  // keyboard.print("Starting...");
-
   // Initialise TFT
   tft.init();
   tft.setRotation(1);
@@ -99,14 +149,14 @@ void setup() {
   digitalWrite(TFT_LEDA_PIN, 0);
   tft.setTextFont(1);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  // tft.pushImage(0, 0, 160, 80, (uint16_t *)gImage_logo);
+ 
 
   // wifi AP setup
   uint32_t low     = ESP.getEfuseMac() & 0xFFFFFFFF; 
   uint32_t high    = ( ESP.getEfuseMac() >> 32 ) % 0xFFFFFFFF;
   uint64_t fullMAC = word(low,high);
 
-  // just want to have some ID to hopefully avoid SSID colision. 
+  // just want to have some ID to hopefully avoid SSID colision at conferences. 
   // hopefully this is good enough *shrug*
   uint16_t small_id = high & 0xFFFF;
 
@@ -114,19 +164,15 @@ void setup() {
   if (!WiFi.softAP(ssid, password)) {
     log_e("Soft AP creation failed.");
     keyboard.print("SoftAP creation failed :( ");
-    while (1)
-      ;
+    while (1);
   }
   IPAddress myIP = WiFi.softAPIP();
-  // keyboard.print("AP IP address: ");
-  // keyboard.println(myIP);
-  keyboard.releaseAll();
   server.begin();
 
   // BGR ordering is typical
   // --- Uncomment for shiny LEDs ---
-  // FastLED.addLeds<APA102, LED_DI_PIN, LED_CI_PIN, BGR>(&leds, 1);
-  // xTaskCreatePinnedToCore(led_task, "led_task", 1024, NULL, 1, NULL, 0);
+  FastLED.addLeds<APA102, LED_DI_PIN, LED_CI_PIN, BGR>(&leds, 1);
+  xTaskCreatePinnedToCore(led_task, "led_task", 1024, NULL, 1, NULL, 0);
 
   lvgl_init();
 
@@ -147,6 +193,10 @@ void setup() {
   lv_obj_set_pos(label, 65, 15);
 
   button.attachClick([] { setup_ps(); });
+
+  // Init SD card
+  sd_init();
+  delay(3000); // delay for 3 seconds so we can read SD mount info. Comment out if you don't care
 }
 
 // set to 0 to help see whats going on. set to 1 to be stealthy
@@ -179,16 +229,48 @@ void setup_ps() {
     keyboard.write('n');
   }
 }
+#define MAX_FILE_LEVELS 5
+void listDir(WiFiClient *client, fs::FS &fs, const char *dirname, uint8_t cur_level) {
+  Serial.printf("Listing directory: %s\n", dirname);
 
+  File root = fs.open(dirname);
+  if (!root) {
+    client->write("Failed to open directory");
+    return;
+  }
+  if (!root.isDirectory()) {
+    client->write("Not a directory");
+    return;
+  }
 
-void write_to_screen(char *label1_text) {
+  File file = root.openNextFile();
+  while (file) {
+    const char *filename = file.name();
+    // skip hidden files
+    if(filename[0] != '.') { 
+      for(short i=0; i < cur_level; i++){
+          client->write("-");
+        }
+        client->write(" ");
+        client->write(filename);
+        client->write("\n");
+        if (file.isDirectory() && cur_level <= MAX_FILE_LEVELS) {
+              listDir(client, fs, file.path(), cur_level + 1);
+        }
+    }
+    file = root.openNextFile();
+  }
+  client->write("\n");
+}
+
+void write_to_screen(const char *label1_text) {
   lv_label_set_text(label, label1_text);
 }
 
 
 void handle_user_input(const char *input, WiFiClient *client) {
   // escape logic
-  if(state != MENU_STATE && (strcmp(input, "hop away\r\n") == 0 ||  strcmp(input, "hop away\n") == 0)) {
+  if(state != MENU_STATE && (strcmp(input, "radio jack off\r\n") == 0 ||  strcmp(input, "radio jack off\n") == 0)) {
        client->write("entering menu state\n");
        state = MENU_STATE;
        write_to_screen("MENU");
@@ -201,6 +283,11 @@ void handle_user_input(const char *input, WiFiClient *client) {
         setup_ps();
         client->write("payload delivered\n");
         state = MENU_STATE;
+      } else if(strcmp(input, "ducky\r\n") == 0 || strcmp(input, "ducky\n") == 0) {
+        client->write("Entering ducky mode \n");
+        listDir(client, SD_MMC, (const char*) "/", 0);
+        client->write("Which ducky file to run? (don't forget the leading /)");
+        state = DUCKY_STATE;
       } else if(strcmp(input, "keyboard\r\n") == 0 || strcmp(input, "keyboard\n") == 0) {
         client->write("Entering keyboard mode\n");
         write_to_screen("KEYBOARD");
@@ -211,8 +298,8 @@ void handle_user_input(const char *input, WiFiClient *client) {
         USBSerial2.write(" \r\n");
         state = SERIAL_STATE;
       } else {
-        client->write("MENU: type 'payload' 'keyboard' or 'serial'. to exit a mode type 'hop away'\n->");
-        write_to_screen("HELP");
+        client->write("MENU: type 'payload', 'ducky', 'keyboard' or 'serial'. to exit a mode type 'radio jack off'\n->");
+        write_to_screen("MENU-->");
         state = MENU_STATE;
       }
   
@@ -220,6 +307,27 @@ void handle_user_input(const char *input, WiFiClient *client) {
 
     case PAYLOAD_STATE:
          client->write("SHHHHH. still dropping payload");
+    break;
+    case DUCKY_STATE: { 
+        client->write("running ->");
+        client->write(input);
+        client->write("\n");
+        write_to_screen(input);
+        state = DUCKY_EXE_STATE;
+        char ducky_errmsg[40];
+        short ducky_err = executeDucky(SD_MMC, input, keyboard, ducky_errmsg, 40);
+        if(ducky_err != 0) {
+          client->write(ducky_errmsg);
+          client->write("\nducky failed. back to menu\n");
+        } else {
+            client->write("ducky ran \n");
+        }
+        
+        state = MENU_STATE;
+    }
+    break;
+    case DUCKY_EXE_STATE:
+        client->write("QUACK. still dropping ducky payload");
     break;
 
     case KEYBOARD_STATE: {
@@ -270,9 +378,6 @@ void loop_wifi() {
     while (client.connected()) {   // loop while the client's connected
       while (client.available()) { // if there's bytes to read from the client,
         String s = client.readString();   
-        // keyboard.write(c);
-        //USBSerial2.write(c);
-        // needs_flush = true;
         handle_user_input(s.c_str(), &client);
       }
       while (state == SERIAL_STATE && USBSerial2.available()) {
