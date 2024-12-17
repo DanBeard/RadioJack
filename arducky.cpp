@@ -1,13 +1,5 @@
 // modified from arducky -- https://github.com/Creased/arducky/blob/master/arducky.ino
-
-// SD card read/write
-#include "Arduino.h"
-#include "lv_driver.h"
-#include "pin_config.h"
-#include "USB.h"
-#include "USBHIDKeyboard.h"
-#include "USBHIDMouse.h"
-#include "FS.h"
+#include "arducky.h"
 
 /**
  * Variables
@@ -75,7 +67,10 @@ void processCommand(USBHIDKeyboard keyboard, String command) {
         keyboard.press(KEY_TAB);
     } else if (command == "GUI" || command == "WINDOWS") {
         keyboard.press(KEY_LEFT_GUI);
-    } else if (command == "SHIFT") {
+    } else if (command == "GUI_R" || command == "WINDOWS_R") {
+        keyboard.press(KEY_LEFT_GUI);
+        keyboard.press('r');
+    }else if (command == "SHIFT") {
         keyboard.press(KEY_RIGHT_SHIFT);
     } else if (command == "ALT") {
         keyboard.press(KEY_LEFT_ALT);
@@ -105,10 +100,14 @@ void processCommand(USBHIDKeyboard keyboard, String command) {
         keyboard.press(KEY_F11);
     } else if (command == "F12" || command == "FUNCTION12") {
         keyboard.press(KEY_F12);
+    } else {
+        keyboard.print("INVALID_COMMAND->'");
+        keyboard.print(command.c_str());
+        keyboard.print("'");
     }
 }
 
-void processLine(String line, USBHIDKeyboard keyboard) {
+void processLine(String line, USBHIDKeyboard keyboard, WiFiClient *client) {
     /*
      * Process Ducky Script according to the official documentation (see https://github.com/hak5darren/USB-Rubber-Ducky/wiki/Duckyscript).
      *
@@ -146,7 +145,7 @@ void processLine(String line, USBHIDKeyboard keyboard) {
      *  - REM (+string)
      *
      */
-
+    keyboard.releaseAll(); // just to be safe
     int space = line.indexOf(' ');  // Find the first 'space' that'll be used to separate the payload from the command
     String command = "";
     String payload = "";
@@ -172,7 +171,8 @@ void processLine(String line, USBHIDKeyboard keyboard) {
             line == "PRINTSCREEN" ||
             line == "SCROLLLOCK" ||
             line == "SPACE" ||
-            line == "TAB"
+            line == "TAB" ||
+            line == "GUI_R"
         ) {
             command = line;
         }
@@ -196,10 +196,16 @@ void processLine(String line, USBHIDKeyboard keyboard) {
     }
 
     if (payload == "" && command != "") {                       // Command from (1)
+        client->write(command.c_str());
         processCommand(keyboard, command);                                // Process command
-    } else if (command == "DELAY") {                            // Delay before the next commande
+    } else if (command == "DELAY") {                            // Delay before the next command
+        payload.trim();                                         // remove extra spaces
+        client->write("Delaying ");
+        client->write(payload.c_str());
         delay((int) payload.toInt());                           // Convert payload to integer and make pause for 'payload' time
     } else if (command == "STRING") {                           // String processing
+        client->write("STRING ");
+        client->write(payload.c_str());
         keyboard.print(payload);                                // Type-in the payload
     } else if (command == "REM") {                              // Comment
     } else if (command != "") {                                 // Command from (2)
@@ -207,21 +213,26 @@ void processLine(String line, USBHIDKeyboard keyboard) {
         while (remaining.length() > 0) {                        // For command in remaining commands
             int space = remaining.indexOf(' ');                 // Find the first 'space' that'll be used to separate commands
             if (space != -1) {                                  // If this isn't the last command
+                client->write(remaining.substring(0, space).c_str());
                 processCommand(keyboard, remaining.substring(0, space));  // Process command
                 remaining = remaining.substring(space + 1);     // Pop command from remaining commands
-            } else {                                            // If this is the last command
+            } else {                   
+                client->write(remaining.c_str());                         // If this is the last command
                 processCommand(keyboard, remaining);                      // Pop command from remaining commands
                 remaining = "";                                 // Clear commands (end of loop)
             }
         }
     } else {
         // Invalid command
+        keyboard.print("INVALID_LINE->");
+        keyboard.print(line);
     }
-
+    delay(10); //insert a small delay so things don't get dropped
     keyboard.releaseAll();
+    client->write("\n");
 }
 
-short executeDucky(fs::FS &fs, const char* ducky_file_path,  USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg) {
+short executeDucky(fs::FS &fs, const char* ducky_file_path,  USBHIDKeyboard& keyboard, char* errmsg, int maxErrMsg, WiFiClient *client) {
       
       File file = fs.open(ducky_file_path);
       if (!file) {
@@ -237,7 +248,7 @@ short executeDucky(fs::FS &fs, const char* ducky_file_path,  USBHIDKeyboard& key
     
                 // Process char
                 if ((int) c == 0x0a){                 // Line ending (LF) reached
-                    processLine(line, keyboard);      // Process script line by reading command and payload
+                    processLine(line, keyboard, client);      // Process script line by reading command and payload
                     line = "";                        // Clean the line to process next
                 } else if((int) c != 0x0d) {          // If char isn't a carriage return (CR)
                     line += c;                        // Put char into line

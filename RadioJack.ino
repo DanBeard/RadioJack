@@ -89,8 +89,9 @@ void refresh_label_text() {
   strcat(label_text, myIP.toString().c_str());
 }
 void sd_init(void) {
-  int32_t x, y;
+  int32_t x=0, y=0;
   SD_MMC.setPins(SD_MMC_CLK_PIN, SD_MMC_CMD_PIN, SD_MMC_D0_PIN, SD_MMC_D1_PIN, SD_MMC_D2_PIN, SD_MMC_D3_PIN);
+   PRINT_STR("source at Radiojack.io", x, y)
   if (!SD_MMC.begin()) {
     PRINT_STR("Card Mount Failed", x, y)
     return;
@@ -196,7 +197,7 @@ void setup() {
 
   // Init SD card
   sd_init();
-  delay(3000); // delay for 3 seconds so we can read SD mount info. Comment out if you don't care
+  delay(4000); // delay for 3 seconds so we can read SD mount info. Comment out if you don't care
 }
 
 // set to 0 to help see whats going on. set to 1 to be stealthy
@@ -315,7 +316,7 @@ void handle_user_input(const char *input, WiFiClient *client) {
         write_to_screen(input);
         state = DUCKY_EXE_STATE;
         char ducky_errmsg[40];
-        short ducky_err = executeDucky(SD_MMC, input, keyboard, ducky_errmsg, 40);
+        short ducky_err = executeDucky(SD_MMC, input, keyboard, ducky_errmsg, 40, client);
         if(ducky_err != 0) {
           client->write(ducky_errmsg);
           client->write("\nducky failed. back to menu\n");
