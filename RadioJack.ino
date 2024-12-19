@@ -3,7 +3,7 @@
 #include "logo.h"
 #include "lv_driver.h"
 #include "pin_config.h"
-
+#include "esp_wifi.h"
 
 /* external library */
 /* To use Arduino, you need to place lv_conf.h in the \Arduino\libraries directory */
@@ -22,7 +22,16 @@
 #include <WiFiAP.h>
 #include <WiFiClient.h>
 
+
 #include "arducky.h"
+
+// Should we include LoRa bridge support?
+#define LORA_BRIDGE_ENABLED
+#define LORA_PORT 4403
+
+#ifdef LORA_BRIDGE_ENABLED
+#include "LoraWifiBridgeClient.h"
+#endif
 
 // Serial globals
 
@@ -363,12 +372,8 @@ void service_loop() {
   button.tick();
 }
 
-void loop_wifi() {
-  WiFiClient client = server.available(); // listen for incoming clients
-
-  if (client) { // if you get a client,
-    // keyboard.println("New Client.");           // print a message out the serial port
-    if(client.connected()){
+void handle_connected_client(WiFiClient &client) {
+  if(client.connected()){
         client.write("Welcome!\n"); 
         state = MENU_STATE;
         handle_user_input(" ", &client); // print menu
@@ -389,13 +394,59 @@ void loop_wifi() {
     }
     // close the connection:
     client.stop();
-    // keyboard.println("Client Disconnected.");
-  } else {
-    service_loop();
-  }
+}
+
+#ifdef LORA_BRIDGE_ENABLED
+void loop_lora_bridge() {
+  if(WiFi.softAPgetStationNum() > 0) {
+      wifi_sta_list_t wifi_sta_list;
+      tcpip_adapter_sta_list_t adapter_sta_list;
+      LoraWifiBridgeClient client;
+  
+      memset(&wifi_sta_list, 0, sizeof(wifi_sta_list));
+      memset(&adapter_sta_list, 0, sizeof(adapter_sta_list));
+  
+      esp_wifi_ap_get_sta_list(&wifi_sta_list);
+      tcpip_adapter_get_sta_list(&wifi_sta_list, &adapter_sta_list);
+    
+      for (int i = 0; i < adapter_sta_list.num; i++) {
+        tcpip_adapter_sta_info_t station = adapter_sta_list.sta[i];
+        //ip_addr_t statip = static_cast<ip_addr_t>(station.ip);
+        char ip_buf[18];
+        char *ip_str = NULL;
+        esp_ip4addr_ntoa(&(station.ip),ip_buf,18);  
+        if(ip_str == NULL) {
+          write_to_screen("Bad IP");
+          return;
+        }
+
+        bool can_send = client.connect(ip_str, LORA_PORT);
+        if (!can_send) {
+          write_to_screen("No Lora");
+          return;
+        } 
+        handle_connected_client(client);
+
+      }
+    }
+}
+#endif
+
+void loop_wifi() {
+  WiFiClient client = server.available(); // listen for incoming clients
+
+  if (client) { // if you get a client,
+    handle_connected_client(client);
+  } 
+
 }
 
 void loop() { // Put your main code here, to run repeatedly:
   loop_wifi();
+#ifdef LORA_BRIDGE_ENABLED
+  // listen for LoRa Bridges if enabled
+  loop_lora_bridge();
+#endif
+  service_loop();
   delay(10); // long delay when not servicing clients
 }
