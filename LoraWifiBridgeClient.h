@@ -6,6 +6,11 @@
 class LoraWifiBridgeClient : public WiFiClient {
     size_t write(const uint8_t *buf, size_t size) override;
     String readString() override;
+    void debug(char * msg);
+
+    public:
+      void (*write_to_screen)(const char *label1_text) = 0;
+      void requestConfigInfo();
    
 };
 

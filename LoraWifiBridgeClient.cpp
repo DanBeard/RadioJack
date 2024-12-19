@@ -3,10 +3,13 @@
 #include "pb_encode.h"
 #include "pb_decode.h"
 
+// set to false once we've debugged
+#define LORA_DEBUG true
+
 // default broadcast
 #define LORA_DEST_ADDR 0xFFFFFFFF
 // default first channel
-#define LORA_CHANNEL_IDX 0
+#define LORA_CHANNEL_IDX 2
 
 // constants taken from mt_protocol.cpp
 // Magic number at the start of all MT packets
@@ -47,8 +50,6 @@ size_t LoraWifiBridgeClient::write(const uint8_t *buf, size_t size) {
   toRadio.which_payload_variant = meshtastic_ToRadio_packet_tag;
   toRadio.packet = meshPacket;
 
-
-
   // construct raw packet
   mesh_buf[0] = MT_MAGIC_0;
   mesh_buf[1] = MT_MAGIC_1;
@@ -67,16 +68,14 @@ size_t LoraWifiBridgeClient::write(const uint8_t *buf, size_t size) {
   return WiFiClient::write((const uint8_t *)mesh_buf, 4 + stream.bytes_written);
 }
 
-char str_buf[PB_BUFSIZE+1];
+char str_buf[PB_BUFSIZE]; // string buf to hold resp
 String LoraWifiBridgeClient::readString() {
-
-  String result;
-
   if (!connected()) {
-    return result;
+    write_to_screen("Not connected. Weird");
+    return String("");
   }
-  
-  str_buf[0] = '\0'; // clear str_buf
+
+  memset(mesh_buf,0,PB_BUFSIZE);
 
   unsigned char* buf = mesh_buf; // use meshbuf to build the proto obj
   
@@ -93,17 +92,21 @@ String LoraWifiBridgeClient::readString() {
     } else if(!start2_seen) {
         if(c == MT_MAGIC_1) start2_seen = true;
         else continue;
-    } else if(payload_len == 0 && bytes_read == 4) { // get packet size
+    } else if(payload_len == 0 && bytes_read >= 4) { // get packet size
         payload_len = mesh_buf[2] << 8 | mesh_buf[3];
-        if(payload_len > PB_BUFSIZE) return String("Bad packet, size impossible");
+        if(payload_len > PB_BUFSIZE)  {
+          debug("Impossible Size!");
+          return String("");
+        }
     }
     
     *buf++ = c;
     if (++bytes_read >= PB_BUFSIZE + 4) {
       // corrupt start over
-      return String("Bad packet. Buffer overrun");
+      debug("Bad packet. Buffer overrun");
+      return String("");
     } 
-    if(bytes_read >= payload_len + 4){
+    if(payload_len != 0 && bytes_read >= payload_len + 4){
       break; // we're done with this packet, move on. 
     }
   }
@@ -115,16 +118,11 @@ String LoraWifiBridgeClient::readString() {
   pb_istream_t stream = pb_istream_from_buffer(mesh_buf + 4, payload_len);
   bool status = pb_decode(&stream, meshtastic_FromRadio_fields, &fromRadio);
   if (!status) {
-    return String("Decoding Failed");
+    write_to_screen("Decoding Failed");
+    return String("");
   }
 
-  // Be prepared to request a node report to re-establish flow after an MT reboot
-  meshtastic_ToRadio toRadio = meshtastic_ToRadio_init_default;
-  toRadio.which_payload_variant = meshtastic_ToRadio_want_config_id_tag;
-  toRadio.want_config_id = SPECIAL_NONCE;
-
   
-
   switch (fromRadio.which_payload_variant) {
     case meshtastic_FromRadio_my_info_tag:
     case meshtastic_FromRadio_node_info_tag:
@@ -137,17 +135,48 @@ String LoraWifiBridgeClient::readString() {
       if (meshPacket->which_payload_variant == meshtastic_MeshPacket_decoded_tag 
             && meshPacket->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP
             && meshPacket->channel == LORA_CHANNEL_IDX) {
-        return String((char*)(meshPacket->decoded.payload.bytes));
-      } else {
-        return String("");
-      }
+
+        //zero out
+        memset(str_buf,0,PB_BUFSIZE);
+        memcpy(str_buf, meshPacket->decoded.payload.bytes,meshPacket->decoded.payload.size);
+        return String(str_buf);
+      } 
+      break;
     }
       
-   
-
     default:
-      return String("Got a payload variant we didn't recognize.");
+      //debug("unrecon payload variant");
+      return String("");
   }
 
-  return WiFiClient::readString();
+  return String("");
+}
+
+void LoraWifiBridgeClient::requestConfigInfo() {
+  meshtastic_ToRadio toRadio = meshtastic_ToRadio_init_default;
+  toRadio.which_payload_variant = meshtastic_ToRadio_want_config_id_tag;
+  toRadio.want_config_id = SPECIAL_NONCE;
+
+  // construct raw packet
+  mesh_buf[0] = MT_MAGIC_0;
+  mesh_buf[1] = MT_MAGIC_1;
+
+  pb_ostream_t stream = pb_ostream_from_buffer(mesh_buf + 4, PB_BUFSIZE);
+  bool status = pb_encode(&stream, meshtastic_ToRadio_fields, &toRadio);
+  if (!status) {
+    return;
+  }
+
+  // Store the payload length in the header
+  mesh_buf[2] = stream.bytes_written / 256;
+  mesh_buf[3] = stream.bytes_written % 256;
+
+
+ WiFiClient::write((const uint8_t *)mesh_buf, 4 + stream.bytes_written);
+ write_to_screen("Info req sent");
+}
+
+void LoraWifiBridgeClient::debug(char * msg) {
+  write_to_screen(msg);
+  write((const uint8_t *)msg, strlen(msg));
 }
