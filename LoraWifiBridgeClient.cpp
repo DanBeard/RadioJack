@@ -3,9 +3,6 @@
 #include "pb_encode.h"
 #include "pb_decode.h"
 
-// set to false once we've debugged
-#define LORA_DEBUG true
-
 // default broadcast
 #define LORA_DEST_ADDR 0xFFFFFFFF
 // default first channel
@@ -33,6 +30,15 @@
 pb_byte_t mesh_buf[PB_BUFSIZE+4];
 
 size_t LoraWifiBridgeClient::write(const uint8_t *buf, size_t size) {
+
+  // edge case... if size is greater than MAX_MESH_PAYLOAD_LEN we need to split it up into multiple packers
+  if(size > MAX_MESH_PAYLOAD_LEN) {
+    size_t bytes_written = 0;
+    for(size_t i=0; i<=size; i += min(((size_t) MAX_MESH_PAYLOAD_LEN), (size-i))) {
+        bytes_written += write(buf+i, min(((size_t) MAX_MESH_PAYLOAD_LEN), (size-i)));
+    }
+    return bytes_written;
+  }
 
   // thanks to meshtastic-arduino for this code
   // construct proto struct
@@ -139,7 +145,7 @@ String LoraWifiBridgeClient::readString() {
         //zero out
         memset(str_buf,0,PB_BUFSIZE);
         memcpy(str_buf, meshPacket->decoded.payload.bytes,meshPacket->decoded.payload.size);
-        return String(str_buf);
+        return String(str_buf)+"\n"; // we need to add a newline here because it looks like meshtatic is stripping trailing whitespace and newlines. Is this a meshtastic thing or and android app thing? dunno
       } 
       break;
     }

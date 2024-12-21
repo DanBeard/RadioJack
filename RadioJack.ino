@@ -51,9 +51,7 @@ USBHIDMouse mouse;
 char ssid[25]; // sside generated in sprintf in setup()
 const char *password = "thisisthepassword"; // after updating to esp32 2.0.14 this password needs to be longer than "thepassword". Dunno why.
 
-#ifndef LORA_BRIDGE_ENABLED
 WiFiServer server(23);
-#endif
 
 // Screen globals
 LV_IMG_DECLARE(avatargif);
@@ -178,9 +176,8 @@ void setup() {
     while (1);
   }
   IPAddress myIP = WiFi.softAPIP();
-  #ifndef LORA_BRIDGE_ENABLED
   server.begin();
-  #endif
+
 
   // BGR ordering is typical
   // --- Uncomment for shiny LEDs ---
@@ -288,7 +285,7 @@ void handle_user_input(const char *input, WiFiClient *client) {
        state = MENU_STATE;
        write_to_screen("MENU");
   }
-Test!Omg!TestHow to get newline I wonder
+
   switch(state) {
     case MENU_STATE: { 
       if(strcmp(input, "payload\r\n") == 0 || strcmp(input, "payload\n") == 0 || strcmp(input, "payload") == 0) {
@@ -377,14 +374,14 @@ void service_loop() {
   button.tick();
 }
 
-int connect_counter = 0;
 int read_counter = 0;
 unsigned long last_read = 0;
+
+char str_buffer[MAX_MESH_PAYLOAD_LEN];
 void handle_connected_client(WiFiClient &client) {
   if(client.connected()){
         state = MENU_STATE;
         handle_user_input(" ", &client); // print menu
-        if(connect_counter++ == 0)// debug
         write_to_screen("Client connected");
         last_read = millis();
       }
@@ -402,8 +399,8 @@ void handle_connected_client(WiFiClient &client) {
         last_read = millis();
       }
       while (state == SERIAL_STATE && USBSerial2.available()) {
-        char c = USBSerial2.read();
-        client.write(c);
+        size_t num_read = USBSerial2.read(str_buffer,MAX_MESH_PAYLOAD_LEN);
+        client.write(str_buffer, num_read);
       }
       // service other tasks/loops
       service_loop();
@@ -458,7 +455,7 @@ void loop_lora_bridge() {
     }
 }
 #endif 
-#ifndef LORA_BRIDGE_ENABLED
+
 void loop_wifi() {
   WiFiClient client = server.available(); // listen for incoming clients
 
@@ -467,12 +464,10 @@ void loop_wifi() {
   } 
 
 }
-#endif
+
 
 void loop() { // Put your main code here, to run repeatedly:
-#ifndef LORA_BRIDGE_ENABLED
   loop_wifi();
-  #endif
 #ifdef LORA_BRIDGE_ENABLED
   // listen for LoRa Bridges if enabled
   loop_lora_bridge();
