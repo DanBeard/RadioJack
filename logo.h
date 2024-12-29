@@ -2,8 +2,7 @@
 
 const String small_window = "[console]::WindowHeight=1;[console]::WindowWidth=1";
 const String bootstrap_ps = R"(
-
-  $portname =  [System.IO.Ports.SerialPort]::getportnames()[-1]
+$portname =  [System.IO.Ports.SerialPort]::getportnames()[-1]
 
   $port = [System.IO.Ports.SerialPort]@{ 
     PortName = $portname
@@ -20,7 +19,6 @@ const String bootstrap_ps = R"(
  $ot = iex $port.readLine()
  $port.write($ot + "`n" + "PS " + (pwd).path +"> ");
   }
-
 )";
 
 

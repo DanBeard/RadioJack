@@ -3,7 +3,7 @@
 #include "logo.h"
 #include "lv_driver.h"
 #include "pin_config.h"
-
+#include "esp_wifi.h"
 
 /* external library */
 /* To use Arduino, you need to place lv_conf.h in the \Arduino\libraries directory */
@@ -22,7 +22,17 @@
 #include <WiFiAP.h>
 #include <WiFiClient.h>
 
+
 #include "arducky.h"
+
+// Should we include meshtastic bridge support?
+#define MESH_BRIDGE_ENABLED
+#define MESH_TCP_PORT 4403
+
+
+#ifdef MESH_BRIDGE_ENABLED
+#include "MeshtasticWifiBridgeClient.h"
+#endif
 
 // Serial globals
 
@@ -169,6 +179,7 @@ void setup() {
   IPAddress myIP = WiFi.softAPIP();
   server.begin();
 
+
   // BGR ordering is typical
   // --- Uncomment for shiny LEDs ---
   FastLED.addLeds<APA102, LED_DI_PIN, LED_CI_PIN, BGR>(&leds, 1);
@@ -270,38 +281,39 @@ void write_to_screen(const char *label1_text) {
 
 void handle_user_input(const char *input, WiFiClient *client) {
   // escape logic
-  if(state != MENU_STATE && (strcmp(input, "radio jack off\r\n") == 0 ||  strcmp(input, "radio jack off\n") == 0)) {
+  if(state != MENU_STATE && (strcmp(input, "radio jack off\r\n") == 0 ||  strcmp(input, "radio jack off\n") == 0 || strcmp(input, "radio jack off") == 0)) {
        client->write("entering menu state\n");
        state = MENU_STATE;
        write_to_screen("MENU");
   }
 
   switch(state) {
-    case MENU_STATE:
-      if(strcmp(input, "payload\r\n") == 0 || strcmp(input, "payload\n") == 0) {
+    case MENU_STATE: { 
+      if(strcmp(input, "payload\r\n") == 0 || strcmp(input, "payload\n") == 0 || strcmp(input, "payload") == 0) {
         state = PAYLOAD_STATE;
         setup_ps();
         client->write("payload delivered\n");
         state = MENU_STATE;
-      } else if(strcmp(input, "ducky\r\n") == 0 || strcmp(input, "ducky\n") == 0) {
+      } else if(strcmp(input, "ducky\r\n") == 0 || strcmp(input, "ducky\n") == 0 || strcmp(input, "ducky") == 0) {
         client->write("Entering ducky mode \n");
         listDir(client, SD_MMC, (const char*) "/", 0);
         client->write("Which ducky file to run? (don't forget the leading /)");
         state = DUCKY_STATE;
-      } else if(strcmp(input, "keyboard\r\n") == 0 || strcmp(input, "keyboard\n") == 0) {
+      } else if(strcmp(input, "keyboard\r\n") == 0 || strcmp(input, "keyboard\n") == 0 || strcmp(input, "keyboard") == 0) {
         client->write("Entering keyboard mode\n");
         write_to_screen("KEYBOARD");
         state = KEYBOARD_STATE;
-      } else if(strcmp(input, "serial\r\n") == 0 || strcmp(input, "serial\n") == 0) {
+      } else if(strcmp(input, "serial\r\n") == 0 || strcmp(input, "serial\n") == 0 || strcmp(input, "serial") == 0) {
         client->write("Entering serial mode\n");
         write_to_screen("SERIAL");
         USBSerial2.write(" \r\n");
         state = SERIAL_STATE;
       } else {
         client->write("MENU: type 'payload', 'ducky', 'keyboard' or 'serial'. to exit a mode type 'radio jack off'\n->");
-        write_to_screen("MENU-->");
+        write_to_screen(input);
         state = MENU_STATE;
       }
+    }
   
       break;
 
@@ -363,39 +375,104 @@ void service_loop() {
   button.tick();
 }
 
+int read_counter = 0;
+unsigned long last_read = 0;
+
+char str_buffer[MAX_MESH_PAYLOAD_LEN];
+void handle_connected_client(WiFiClient &client) {
+  if(client.connected()){
+        state = MENU_STATE;
+        handle_user_input(" ", &client); // print menu
+        write_to_screen("Client connected");
+        last_read = millis();
+      }
+
+    while (client.connected()) {   // loop while the client's connected
+      
+      while (client.available()) { // if there's bytes to read from the client,
+        read_counter++;
+        last_read = millis();
+        String s = client.readString();  
+        if(s.length() > 0) {
+              write_to_screen(s.c_str()); 
+              handle_user_input(s.c_str(), &client);
+        } 
+        last_read = millis();
+      }
+      while (state == SERIAL_STATE && USBSerial2.available()) {
+        size_t num_read = USBSerial2.read(str_buffer,MAX_MESH_PAYLOAD_LEN);
+        client.write(str_buffer, num_read);
+      }
+      // service other tasks/loops
+      service_loop();
+      // debug -- make sure user is still there if we stuck on menu
+      if(state == MENU_STATE && millis() - last_read > 30 * 1000) {
+        String ping = "Still there? Ping! " + String(read_counter);
+        client.write(ping.c_str());
+        last_read = millis();
+      }
+    }
+    // close the connection:
+    client.stop();
+    write_to_screen("Client disconnected");
+}
+
+#ifdef MESH_BRIDGE_ENABLED
+void loop_mesh_bridge() {
+  if(WiFi.softAPgetStationNum() > 0) {
+      wifi_sta_list_t wifi_sta_list;
+      tcpip_adapter_sta_list_t adapter_sta_list;
+      MeshtasticWifiBridgeClient client;
+      client.write_to_screen = write_to_screen;
+  
+      memset(&wifi_sta_list, 0, sizeof(wifi_sta_list));
+      memset(&adapter_sta_list, 0, sizeof(adapter_sta_list));
+  
+      esp_wifi_ap_get_sta_list(&wifi_sta_list);
+      tcpip_adapter_get_sta_list(&wifi_sta_list, &adapter_sta_list);
+    
+      for (int i = 0; i < adapter_sta_list.num; i++) {
+        tcpip_adapter_sta_info_t station = adapter_sta_list.sta[i];
+        //ip_addr_t statip = static_cast<ip_addr_t>(station.ip);
+        char ip_buf[20];
+        char *ip_str = NULL;
+        ip_str = esp_ip4addr_ntoa(&(station.ip),ip_buf,20);  
+        if(ip_str == NULL) {
+          write_to_screen("Bad IP");
+          return;
+        }
+
+        bool can_send = client.connect(ip_str, MESH_TCP_PORT);
+        if (!can_send) {
+          write_to_screen("No Mesh");
+          return;
+        } 
+
+        // we're connected
+        client.requestConfigInfo(); // request node info to jump start convo
+        handle_connected_client(client);
+
+      }
+    }
+}
+#endif 
+
 void loop_wifi() {
   WiFiClient client = server.available(); // listen for incoming clients
 
   if (client) { // if you get a client,
-    // keyboard.println("New Client.");           // print a message out the serial port
-    if(client.connected()){
-        client.write("Welcome!\n"); 
-        state = MENU_STATE;
-        handle_user_input(" ", &client); // print menu
-        write_to_screen("Client connected");
-      }
+    handle_connected_client(client);
+  } 
 
-    while (client.connected()) {   // loop while the client's connected
-      while (client.available()) { // if there's bytes to read from the client,
-        String s = client.readString();   
-        handle_user_input(s.c_str(), &client);
-      }
-      while (state == SERIAL_STATE && USBSerial2.available()) {
-        char c = USBSerial2.read();
-        client.write(c);
-      }
-      // service other tasks/loops
-      service_loop();
-    }
-    // close the connection:
-    client.stop();
-    // keyboard.println("Client Disconnected.");
-  } else {
-    service_loop();
-  }
 }
+
 
 void loop() { // Put your main code here, to run repeatedly:
   loop_wifi();
+#ifdef MESH_BRIDGE_ENABLED
+  // listen for mestastic Bridges if enabled
+  loop_mesh_bridge();
+#endif
+  service_loop();
   delay(10); // long delay when not servicing clients
 }
