@@ -25,12 +25,13 @@
 
 #include "arducky.h"
 
-// Should we include LoRa bridge support?
-#define LORA_BRIDGE_ENABLED
-#define LORA_PORT 4403
+// Should we include meshtastic bridge support?
+#define MESH_BRIDGE_ENABLED
+#define MESH_TCP_PORT 4403
 
-#ifdef LORA_BRIDGE_ENABLED
-#include "LoraWifiBridgeClient.h"
+
+#ifdef MESH_BRIDGE_ENABLED
+#include "MeshtasticWifiBridgeClient.h"
 #endif
 
 // Serial globals
@@ -416,12 +417,12 @@ void handle_connected_client(WiFiClient &client) {
     write_to_screen("Client disconnected");
 }
 
-#ifdef LORA_BRIDGE_ENABLED
-void loop_lora_bridge() {
+#ifdef MESH_BRIDGE_ENABLED
+void loop_mesh_bridge() {
   if(WiFi.softAPgetStationNum() > 0) {
       wifi_sta_list_t wifi_sta_list;
       tcpip_adapter_sta_list_t adapter_sta_list;
-      LoraWifiBridgeClient client;
+      MeshtasticWifiBridgeClient client;
       client.write_to_screen = write_to_screen;
   
       memset(&wifi_sta_list, 0, sizeof(wifi_sta_list));
@@ -441,9 +442,9 @@ void loop_lora_bridge() {
           return;
         }
 
-        bool can_send = client.connect(ip_str, LORA_PORT);
+        bool can_send = client.connect(ip_str, MESH_TCP_PORT);
         if (!can_send) {
-          write_to_screen("No Lora");
+          write_to_screen("No Mesh");
           return;
         } 
 
@@ -468,9 +469,9 @@ void loop_wifi() {
 
 void loop() { // Put your main code here, to run repeatedly:
   loop_wifi();
-#ifdef LORA_BRIDGE_ENABLED
-  // listen for LoRa Bridges if enabled
-  loop_lora_bridge();
+#ifdef MESH_BRIDGE_ENABLED
+  // listen for mestastic Bridges if enabled
+  loop_mesh_bridge();
 #endif
   service_loop();
   delay(10); // long delay when not servicing clients
