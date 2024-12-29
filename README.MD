@@ -13,6 +13,10 @@ Note: Install ESP32 version 2.0.14 or earlier. Anything after 2.0.14 is not supp
 
 Once the provided example firmware is compiling and flashing, open the RadioJack Arduino project. Compile and flash. 
 
+### Optional Meshtastic support
+If you want to be able to use the meshtastic bridge then make sure that https://github.com/meshtastic/Meshtastic-arduino is also in your arduini library folder 
+and MESH_BRIDGE_ENABLED macro is defined. Further customization (Channel index, payload length, etc) is controlled via macors in MestasticWifiBridgeClient.h )
+
 ## Usage Instructions
 Connect to the WIFI SSD shown on the screen. It should be unique per device. The SSID password is defined in the code. The password is "thisisthepassword" by default and can be changed.
 Telnet to the IP shown on the screen. Follow the intuitive text-based interface!
